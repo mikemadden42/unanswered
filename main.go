@@ -81,6 +81,8 @@ type discuss struct {
 }
 
 func main() {
+	fmt.Printf("%-33s %s\n", "Date", "Title")
+	fmt.Printf("%-33s %s\n", "====", "=====")
 	for i := 0; i < 10; i++ {
 		unanswered(i)
 	}
@@ -99,7 +101,7 @@ func unanswered(page int) {
 
 	for _, topic := range responseObject.TopicList.Topics {
 		if topic.PostsCount == 1 {
-			fmt.Printf("%33s - %s\n", topic.CreatedAt, topic.Title)
+			fmt.Printf("%33s %s\n", topic.CreatedAt, topic.Title)
 		}
 	}
 }
