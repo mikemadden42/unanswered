@@ -82,9 +82,7 @@ type discuss struct {
 
 func main() {
 	for i := 0; i < 10; i++ {
-		fmt.Println("========")
 		unanswered(i)
-		fmt.Println("========")
 	}
 }
 
@@ -99,13 +97,11 @@ func unanswered(page int) {
 	err = json.Unmarshal(responseData, &responseObject)
 	checkErr(err)
 
-	for i := 0; i < len(responseObject.TopicList.Topics); i++ {
-		if responseObject.TopicList.Topics[i].PostsCount == 1 {
-			fmt.Printf("%s - %s\n", responseObject.TopicList.Topics[i].CreatedAt, responseObject.TopicList.Topics[i].Title)
-
+	for _, topic := range responseObject.TopicList.Topics {
+		if topic.PostsCount == 1 {
+			fmt.Printf("%33s - %s\n", topic.CreatedAt, topic.Title)
 		}
 	}
-
 }
 
 func checkErr(err error) {
