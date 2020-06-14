@@ -84,7 +84,7 @@ func main() {
 }
 
 func unanswered(page int) {
-	response, err := http.Get("https://discuss.elastic.co/c/beats/l/latest.json?page=" + strconv.Itoa(page))
+	response, err := http.Get("https://discuss.elastic.co/c/elastic-stack/beats/l/latest.json?page=" + strconv.Itoa(page))
 	checkErr(err)
 
 	responseData, err := ioutil.ReadAll(response.Body)
