@@ -1,108 +1,86 @@
+// Command unanswered lists topics on discuss.elastic.co that have no replies.
 package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"log"
 	"net/http"
-	"strconv"
+	"time"
 )
 
-type discuss struct {
-	PrimaryGroups []struct {
-		FlairBgColor string `json:"flair_bg_color"`
-		FlairColor   string `json:"flair_color"`
-		FlairURL     string `json:"flair_url"`
-		ID           int64  `json:"id"`
-		Name         string `json:"name"`
-	} `json:"primary_groups"`
+const baseURL = "https://discuss.elastic.co"
+
+type topic struct {
+	CreatedAt         string `json:"created_at"`
+	Title             string `json:"title"`
+	PostsCount        int64  `json:"posts_count"`
+	Closed            bool   `json:"closed"`
+	Pinned            bool   `json:"pinned"`
+	HasAcceptedAnswer bool   `json:"has_accepted_answer"`
+}
+
+type latest struct {
 	TopicList struct {
-		CanCreateTopic bool        `json:"can_create_topic"`
-		Draft          interface{} `json:"draft"`
-		DraftKey       string      `json:"draft_key"`
-		DraftSequence  interface{} `json:"draft_sequence"`
-		MoreTopicsURL  string      `json:"more_topics_url"`
-		PerPage        int64       `json:"per_page"`
-		TopTags        []string    `json:"top_tags"`
-		Topics         []struct {
-			Archetype          string      `json:"archetype"`
-			Archived           bool        `json:"archived"`
-			Bookmarked         interface{} `json:"bookmarked"`
-			Bumped             bool        `json:"bumped"`
-			BumpedAt           string      `json:"bumped_at"`
-			CanVote            bool        `json:"can_vote"`
-			CategoryID         int64       `json:"category_id"`
-			Closed             bool        `json:"closed"`
-			CreatedAt          string      `json:"created_at"`
-			Excerpt            string      `json:"excerpt"`
-			FancyTitle         string      `json:"fancy_title"`
-			FeaturedLink       interface{} `json:"featured_link"`
-			HasAcceptedAnswer  bool        `json:"has_accepted_answer"`
-			HasSummary         bool        `json:"has_summary"`
-			HighestPostNumber  int64       `json:"highest_post_number"`
-			ID                 int64       `json:"id"`
-			ImageURL           string      `json:"image_url"`
-			LastPostedAt       string      `json:"last_posted_at"`
-			LastPosterUsername string      `json:"last_poster_username"`
-			LikeCount          int64       `json:"like_count"`
-			Liked              interface{} `json:"liked"`
-			Pinned             bool        `json:"pinned"`
-			PinnedGlobally     bool        `json:"pinned_globally"`
-			Posters            []struct {
-				Description    string `json:"description"`
-				Extras         string `json:"extras"`
-				PrimaryGroupID int64  `json:"primary_group_id"`
-				UserID         int64  `json:"user_id"`
-			} `json:"posters"`
-			PostsCount int64       `json:"posts_count"`
-			ReplyCount int64       `json:"reply_count"`
-			Slug       string      `json:"slug"`
-			Tags       []string    `json:"tags"`
-			Title      string      `json:"title"`
-			Unpinned   interface{} `json:"unpinned"`
-			Unseen     bool        `json:"unseen"`
-			UserVoted  interface{} `json:"user_voted"`
-			Views      int64       `json:"views"`
-			Visible    bool        `json:"visible"`
-			VoteCount  interface{} `json:"vote_count"`
-		} `json:"topics"`
+		MoreTopicsURL string  `json:"more_topics_url"`
+		Topics        []topic `json:"topics"`
 	} `json:"topic_list"`
-	Users []struct {
-		AvatarTemplate string `json:"avatar_template"`
-		ID             int64  `json:"id"`
-		Name           string `json:"name"`
-		Username       string `json:"username"`
-	} `json:"users"`
 }
 
 func main() {
+	category := flag.String("category", "elastic-stack/beats/28", "category path, as in /c/<category>/l/latest")
+	pages := flag.Int("pages", 10, "maximum number of pages to fetch")
+	flag.Parse()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+
 	fmt.Printf("%-24s %s\n", "Date", "Title")
 	fmt.Printf("%-24s %s\n", "====", "=====")
-	for i := 0; i < 10; i++ {
-		unanswered(i)
-	}
-}
-
-func unanswered(page int) {
-	response, err := http.Get("https://discuss.elastic.co/c/elastic-stack/beats/l/latest.json?page=" + strconv.Itoa(page))
-	checkErr(err)
-
-	responseData, err := ioutil.ReadAll(response.Body)
-	checkErr(err)
-
-	var responseObject discuss
-	err = json.Unmarshal(responseData, &responseObject)
-	checkErr(err)
-
-	for _, topic := range responseObject.TopicList.Topics {
-		if topic.PostsCount == 1 {
-			fmt.Printf("%24s %s\n", topic.CreatedAt, topic.Title)
+	for page := 0; page < *pages; page++ {
+		l, err := fetch(client, *category, page)
+		if err != nil {
+			log.Fatalf("page %d: %v", page, err)
+		}
+		for _, t := range unanswered(l.TopicList.Topics) {
+			fmt.Printf("%-24s %s\n", t.CreatedAt, t.Title)
+		}
+		if l.TopicList.MoreTopicsURL == "" || len(l.TopicList.Topics) == 0 {
+			break
 		}
 	}
 }
 
-func checkErr(err error) {
+func fetch(client *http.Client, category string, page int) (*latest, error) {
+	u := fmt.Sprintf("%s/c/%s/l/latest.json?page=%d", baseURL, category, page)
+	resp, err := client.Get(u)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: %s", u, resp.Status)
+	}
+	return decode(resp.Body)
+}
+
+func decode(r io.Reader) (*latest, error) {
+	var l latest
+	if err := json.NewDecoder(r).Decode(&l); err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+// unanswered returns the open, unpinned topics that have only the original post.
+func unanswered(topics []topic) []topic {
+	var out []topic
+	for _, t := range topics {
+		if t.PostsCount == 1 && !t.Closed && !t.Pinned && !t.HasAcceptedAnswer {
+			out = append(out, t)
+		}
+	}
+	return out
 }
